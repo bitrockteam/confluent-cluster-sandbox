@@ -1,0 +1,105 @@
+---
+- hosts: all
+  become: true
+  tasks:
+
+    - name: Get the broker id from the hostname
+      shell: hostname | awk '{print substr($0,length,1)}'
+      register: brokerid
+
+    - name: Get the broker id into a fact
+      set_fact: kafka_broker_id={{ brokerid.stdout_lines[0] }}
+
+    - name: Install Confluent repository key
+      rpm_key:
+        state: present
+        key: http://packages.confluent.io/rpm/3.2/archive.key
+
+    - name: Configure Confluent yum repository
+      blockinfile:
+        create: yes
+        path: /etc/yum.repos.d/confluent.repo
+        block: |
+          [Confluent.dist]
+          name=Confluent repository (dist)
+          baseurl=http://packages.confluent.io/rpm/3.2/7
+          gpgcheck=1
+          gpgkey=http://packages.confluent.io/rpm/3.2/archive.key
+          enabled=1
+          [Confluent]
+          name=Confluent repository
+          baseurl=http://packages.confluent.io/rpm/3.2
+          gpgcheck=1
+          gpgkey=http://packages.confluent.io/rpm/3.2/archive.key
+          enabled=1
+    - name: yum-clean-metadata
+      command: yum clean metadata
+      args:
+        warn: no
+
+    - name: Upgrade all packages and update the repos
+      yum:
+        name: '*'
+        state: latest
+
+    - name: Install packages
+      yum: state=present name={{ item }}
+      with_items:
+      - nc
+      - telnet
+      - java-1.7.0-openjdk-headless
+      - confluent-platform-oss-2.11
+
+    - name: Set soft ulimits
+      pam_limits:
+        domain: "*"
+        limit_type: soft
+        limit_item: nofile
+        value: 64000
+
+    - name: Set hard ulimits
+      pam_limits:
+        domain: "*"
+        limit_type: hard
+        limit_item: nofile
+        value: 64000
+
+    - name: Stop firewalld service
+      systemd:
+        state: stopped
+        name: firewalld
+        enabled: no
+
+    - name: Set SELinux to permissive
+      selinux:
+        policy: targeted
+        state: permissive
+
+    - template:
+        src: zookeeper.properties.j2
+        dest: /etc/kafka/zookeeper.properties
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Create the Zookeeper directory
+      file:
+        path: /var/lib/zookeeper
+        state: directory
+        mode: 0755
+
+    - name: Create Zookeeper myid file
+      shell: echo '{{ kafka_broker_id }}' > /var/lib/zookeeper/myid
+
+    - template:
+        src: server.properties.j2
+        dest: /etc/kafka/server.properties
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: Start Zookeeper
+      command: /usr/bin/zookeeper-server-start -daemon /etc/kafka/zookeeper.properties
+
+    - name: Start Kafka
+      command: /usr/bin/kafka-server-start -daemon /etc/kafka/server.properties
