@@ -23,7 +23,7 @@ boxes = [
 ]
 
 Vagrant.configure(2) do |config|
-  config.vm.box = "bento/centos-7.2.4"
+  config.vm.box = "bento/centos-7.4"
   boxes.each do |opts|
     config.vm.define opts[:name] do |config|
       config.vm.hostname = opts[:name]
